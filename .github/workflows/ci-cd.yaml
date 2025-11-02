@@ -40,3 +40,13 @@ jobs:
         hide_complexity: true
         indicators: true
         output: console
+    
+    - name: Zip Artifact
+      run: zip app.zip ./publish
+
+    - id: upload
+      name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dotnet-webapp
+        path: app.zip
