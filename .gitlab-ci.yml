@@ -1,0 +1,59 @@
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0-noble
+  script:
+    - dotnet restore
+    - dotnet build --no-restore --configuration Release
+  artifacts:
+    paths:
+      - WiredBrainApi.Web/bin/      
+
+test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0-noble
+  dependencies:
+    - build
+  script:
+    - dotnet tool install -g dotnet-reportgenerator-globaltool
+    - export PATH="$PATH:/root/.dotnet/tools"
+    - dotnet test "WiredBrain.Tests/WiredBrain.Tests.csproj" --collect "XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+    - reportgenerator -reports:"WiredBrain.Tests/TestResults/*/coverage.cobertura.xml" -targetdir:"coverage" -reporttypes:Html
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: WiredBrain.Tests/TestResults/*/coverage.cobertura.xml
+
+package:
+  before_script:
+    - apt-get update
+    - apt-get install -y zip unzip
+  stage: package
+  image: mcr.microsoft.com/dotnet/sdk:8.0-noble
+  dependencies:
+    - build
+  script:
+    - dotnet publish "WiredBrainApi.Web/WiredBrainApi.Web.csproj" -c Release -o ./publish --self-contained -r linux-x64 /p:UseAppHost=true
+    - zip -r app.zip ./publish
+  artifacts:
+    paths:
+      - app.zip
+
+deploy:
+  stage: deploy
+  image: mcr.microsoft.com/azure-cli
+  needs:
+    - package
+  dependencies:
+    - package
+  script:
+    - az login --service-principal --username $APP_ID --password $CLIENT_SECRET --tenant $TENANT_ID
+    - az webapp deploy --name "app-wiredbrainapi" --resource-group "WiredBrain" --src-path app.zip

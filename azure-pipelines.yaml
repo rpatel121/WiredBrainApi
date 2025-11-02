@@ -1,0 +1,74 @@
+name: Wired Brain Pipeline
+
+trigger:
+- main
+
+stages:
+- stage: BuildAndTest
+  displayName: Build and Test
+  jobs:
+  - job: Build
+    displayName: Build the Application
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '8.0.x'
+
+    - script: dotnet restore
+      displayName: Restore Dependencies
+
+    - script: dotnet build --no-restore --configuration Release
+      displayName: Build
+
+    - script: dotnet test "WiredBrain.Tests/WiredBrain.Tests.csproj" --collect "XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+      condition: succeeded()
+      displayName: Run Tests and Collect Code Coverage
+
+    - task: PublishCodeCoverageResults@1
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '**/coverage.cobertura.xml'
+        reportDirectory: ''
+        failIfCoverageEmpty: false
+
+    - script: dotnet publish "WiredBrainApi.Web/WiredBrainApi.Web.csproj" -c Release -o $(Build.ArtifactStagingDirectory)/publish --self-contained -r linux-x64 /p:UseAppHost=true
+      displayName: Publish Application
+
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/publish'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+        replaceExistingArchive: true
+      displayName: Create Zip Artifact
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
+        artifactName: 'dotnet-webapp'        
+
+- stage: Deploy
+  displayName: Deploy to Azure
+  dependsOn: BuildAndTest
+  jobs:
+  - job: DeployToAzure
+    displayName: Deploy to Azure App Service
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        artifactName: 'dotnet-webapp'
+        downloadPath: '$(Pipeline.Workspace)'
+
+    - task: AzureWebApp@1
+      inputs:
+        azureSubscription: wiredBrainConnection
+        appType: 'webAppLinux'
+        appName: 'app-wiredbrainapi'
+        package: '$(Pipeline.Workspace)/dotnet-webapp/app.zip'
+
